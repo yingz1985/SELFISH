@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0-only
+
 /*
  * Implementation of the kernel access vector cache (AVC).
  *
@@ -93,6 +93,8 @@ struct avc_callback_node {
 DEFINE_PER_CPU(struct avc_cache_stats, avc_cache_stats) = { 0 };
 #endif
 
+
+
 struct selinux_avc {
 	unsigned int avc_cache_threshold;
 	struct avc_cache avc_cache;
@@ -130,6 +132,9 @@ static struct kmem_cache *avc_node_cachep;
 static struct kmem_cache *avc_xperms_data_cachep;
 static struct kmem_cache *avc_xperms_decision_cachep;
 static struct kmem_cache *avc_xperms_cachep;
+
+int sendmsg(struct socket *sock,size_t size,char* sendbuf);//had implicit declaration error
+char* recvmsg(struct socket *sock,size_t size,unsigned char* recv_buf);
 
 static inline int avc_hash(u32 ssid, u32 tsid, u16 tclass)
 {
@@ -521,7 +526,7 @@ static struct avc_node *avc_alloc_node(struct selinux_avc *avc)
 out:
 	return node;
 }
-int sendmsg(socket *sock,size_t size,char* sendbuf)    //sendbuf should already been initialized
+int sendmsg(struct socket *sock,size_t size,char* sendbuf)    //sendbuf should already been initialized
 {
 
 
@@ -554,11 +559,11 @@ int sendmsg(socket *sock,size_t size,char* sendbuf)    //sendbuf should already 
     
 }
 
-char* recvmsg(socket *sock,size_t size,unsigned char* recv_buf)
+char* recvmsg(struct socket *sock,size_t size,unsigned char* recv_buf)
 {
     struct kvec recv_vec;
     struct msghdr recv_msg;
-    memset(recvbuf, 0, size);
+    memset(recv_buf, 0, size);
     memset(&recv_vec, 0, sizeof(recv_vec));
     memset(&recv_msg, 0, sizeof(recv_msg));
     recv_vec.iov_base = recv_buf;
@@ -567,20 +572,21 @@ char* recvmsg(socket *sock,size_t size,unsigned char* recv_buf)
     int ret = kernel_recvmsg(sock, &recv_msg, &recv_vec, 4, size, 0);
     if(ret!=size)
     {
-        printk("client: kernel_recvmsg error!\n")
+        printk("client: kernel_recvmsg error!\n");
         return NULL;
     }
     printk("client: received message:\n %s\n", recv_buf);
     return recv_buf;
 }
-socket* connect_sock()
+static struct socket * connect_sock(void)
 {
     struct socket *sock;
     struct sockaddr_in s_addr;
-    unsigned short serverport=7;
-    
+    unsigned short portnum=7;
+	
     memset(&s_addr,0,sizeof(s_addr));
     s_addr.sin_family=AF_INET;
+
     s_addr.sin_port=htons(portnum);
     
     s_addr.sin_addr.s_addr=in_aton("192.168.1.10");
@@ -590,28 +596,28 @@ socket* connect_sock()
     
     if( sock_create( PF_INET,SOCK_STREAM,IPPROTO_TCP,&sock)<0 ) {
 		printk( KERN_ERR "server: Error creating serversocket.\n" );
-		return -EIO;
 	}
     printk("client: socket create ok!\n");
 
     
-	int clienterror = sock->ops->connect( sock,
+	//int clienterror = 
+	sock->ops->connect( sock,
 			(struct sockaddr *) &s_addr, sizeof( s_addr ), O_RDWR );
-	if( clienterror < 0 ) {
-		printk( KERN_ERR "Carrera: Connect error = %d on clientsocket",
-				clienterror );
-		return -EIO;
-	}
+	//if( clienterror < 0 ) {
+	//	printk( KERN_ERR "Carrera: Connect error = %d on clientsocket",
+	//			clienterror );
+		
+	//}
 
     return sock;
 }
 
 u8 retrieve(u32 ssid,u32 tsid,u16 objc)    //returns 8 bits, only 6 are needed
 {
-    socket* sock = connect_sock();
-    if(!sock)//if null
+    struct socket* sock = connect_sock();
+    if(!sock)//if NULL
     {
-        goto out;
+        return 0;
     }
     unsigned char *sendbuf=NULL;
     sendbuf=kmalloc(12,GFP_KERNEL);
@@ -619,7 +625,7 @@ u8 retrieve(u32 ssid,u32 tsid,u16 objc)    //returns 8 bits, only 6 are needed
     if(sendbuf==NULL)
     {
         printk("client: sendbuf kmalloc error!\n");
-        goto out;
+        return 0;
     }
     /*    *sendbuf = ssid;
      *(sendbuf+4) = tsid;
@@ -631,31 +637,31 @@ u8 retrieve(u32 ssid,u32 tsid,u16 objc)    //returns 8 bits, only 6 are needed
     *((unsigned short*)(sendbuf+8)) = 0xffff;    //0xff for retrieval,else for storage
     *((unsigned short*)(sendbuf+10))= objc;
     
-    int err = sendmsg(sock,12,sendbuf);
+    int err = sendmsg(sock,12,(char*)sendbuf);
     if(err)
     {
-        goto out;
+        return 0;
     }
     
     unsigned char* recv_buf = kmalloc(4, GFP_KERNEL);
     if(recv_buf == NULL){
         printk("client: recv_buf kmalloc error!\n");
-        goto out;
+        return 0;
     }
     
-    unsigned char* result =  recvmsg(sock,4,recv_buf)
+    unsigned char* result =  (unsigned char*)recvmsg(sock,4,recv_buf);
     
     
     
     kernel_sock_shutdown(sock, SHUT_RDWR);
     sock_release(sock);
-    if(result)//not null
+    if(result)//not NULL
     {
-        return (u8)result;
+        return (u8)result;	//return (u8)result originally;
     }
     else
     {
-        goto out;
+        return 0;
     }
     
 }
@@ -785,10 +791,11 @@ static struct avc_node *avc_insert(struct selinux_avc *avc,
 				   struct av_decision *avd,
 				   struct avc_xperms_node *xp_node)
 {
-	 socket* sock = connect_sock();
-    if(!sock)//if null
+    struct socket* sock = connect_sock();
+    struct avc_node *node = NULL;
+    if(!sock)//if NULL
     {
-        goto out;
+        return NULL;
     }
     unsigned char *sendbuf=NULL;
     sendbuf=kmalloc(12,GFP_KERNEL);
@@ -796,24 +803,24 @@ static struct avc_node *avc_insert(struct selinux_avc *avc,
     if(sendbuf==NULL)
     {
         printk("client: sendbuf kmalloc error!\n");
-        goto out;
+        return NULL;
     }
     *((unsigned int*)sendbuf) = ssid;
     *((unsigned int*)(sendbuf+4)) = tsid;
     *((unsigned short*)(sendbuf+8)) = avd->allowed;    //0xff for retrieval,else for storage
-    *((unsigned short*)(sendbuf+10))= objc;
+    *((unsigned short*)(sendbuf+10))= tclass;
     
-    int err = sendmsg(sock,12,sendbuf);
+    int err = sendmsg(sock,12,(char*)sendbuf);
     if(err)
     {
-        goto out;
+        return NULL;
     }
     
     kernel_sock_shutdown(sock, SHUT_RDWR);
     sock_release(sock);
     
     node = avc_alloc_node(avc);
-    avc_node_populate(node, ssid, tsid, tclass, &avd);
+    avc_node_populate(node, ssid, tsid, tclass, avd);
     
     return node;
 }
@@ -835,7 +842,7 @@ static void avc_audit_pre_callback(struct audit_buffer *ab, void *a)
 	audit_log_format(ab, "avc:  %s ", sad->denied ? "denied" : "granted");
 
 	if (av == 0) {
-		audit_log_format(ab, " null");
+		audit_log_format(ab, " NULL");
 		return;
 	}
 
@@ -1392,3 +1399,4 @@ void avc_disable(void)
 		/* kmem_cache_destroy(avc_node_cachep); */
 	}
 }
+
